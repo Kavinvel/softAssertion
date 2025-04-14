@@ -1,0 +1,2 @@
+# softAssertion
+softAssertion In cypress
