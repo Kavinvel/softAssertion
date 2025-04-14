@@ -1,0 +1,68 @@
+let itBlockErrors = {};
+let totalFailedAssertionsByDescribe = {};
+
+Cypress.Commands.add('softAssert', (actualValue, expectedValue, message) => {
+  return cy.wrap(null, { timeout: Cypress.config('defaultCommandTimeout') }).then(() => {
+    try {
+      expect(actualValue).to.equal(expectedValue, message);
+    } catch (err) {
+      const itBlockTitle = Cypress.currentTest.title;
+      const describeBlockTitle = Cypress.currentTest.titlePath[0];
+
+      totalFailedAssertionsByDescribe[describeBlockTitle] = totalFailedAssertionsByDescribe[describeBlockTitle] || 0;
+      totalFailedAssertionsByDescribe[describeBlockTitle]++;
+
+      if (!itBlockErrors[itBlockTitle]) {
+        itBlockErrors[itBlockTitle] = [];
+      }
+
+      itBlockErrors[itBlockTitle].push({ message, error: err });
+    }
+  });
+});
+
+Cypress.Commands.add('softShould', { prevSubject: 'element' }, (subject, assertion, ...args) => {
+  try {
+    const itBlockTitle = Cypress.currentTest.title;
+    const describeBlockTitle = Cypress.currentTest.titlePath[0];
+
+    // Split the assertion string like "not.be.visible" => ['not', 'be', 'visible']
+    const parts = assertion.split('.');
+
+    let expectChain = expect(subject);
+    // Apply each part dynamically
+    parts.forEach(part => {
+      expectChain = expectChain[part];
+    });
+    // Finally call the matcher with arguments
+    expectChain(...args);
+  } catch (err) {
+    const itBlockTitle = Cypress.currentTest.title;
+    const describeBlockTitle = Cypress.currentTest.titlePath[0];
+    totalFailedAssertionsByDescribe[describeBlockTitle] = totalFailedAssertionsByDescribe[describeBlockTitle] || 0;
+    totalFailedAssertionsByDescribe[describeBlockTitle]++;
+    if (!itBlockErrors[itBlockTitle]) {
+      itBlockErrors[itBlockTitle] = [];
+    }
+    const message = `Expected element to satisfy: "${assertion}" with args: ${args.join(', ')}`;
+    itBlockErrors[itBlockTitle].push({ message, error: err });
+  }
+  return cy.wrap(subject); // to allow continued chaining
+});
+
+Cypress.Commands.add('assertAll', () => {
+  const errors = itBlockErrors;
+  itBlockErrors = {};
+  if (Object.keys(errors).length > 0) {
+    const errorMessages = Object.entries(errors).map(([title, entries], index) => {
+      const errorText = entries.map(({ error }) => `=> ${error.message}`).join('\n\n');
+      return `${index + 1}. Test Title: ${title}\n${errorText}`;
+    });
+
+    const summary = Object.entries(totalFailedAssertionsByDescribe).map(([describe, count]) => {
+      return `Total assertion failures in "${describe}": ${count}`;
+    }).join('\n');
+
+    throw new Error(`Soft assertion failed: Total it block failed (${Object.keys(errors).length})\n\n${errorMessages.join('\n')}\n\n${summary}`);
+  }
+});
